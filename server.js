@@ -21,20 +21,10 @@
 //  }
 // ══════════════════════════════════════════════════════════
 
-const WebSocket = require("ws");
-const http = require("http");
+const WebSocket = require('ws');
 const PORT = process.env.PORT || 3000;
-
-// HTTP server needed so Render can wake the dyno and route WS upgrades
-const httpServer = http.createServer(function(req, res) {
-  res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
-  res.end("DEAD ZONE SERVER OK");
-});
-const wss = new WebSocket.Server({ server: httpServer });
-httpServer.listen(PORT, function() {
-  console.log("Dead Zone server running on port " + PORT);
-});
-const rooms = {};
+const wss = new WebSocket.Server({ port: PORT });
+const rooms = {};  // roomCode → room
 
 // ── helpers ────────────────────────────────────────────────
 function genCode() {
@@ -45,30 +35,27 @@ function genCode() {
 }
 
 function send(ws, msg) {
-  try {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-  } catch(e) { console.error('send error:', e.message); }
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
 function broadcast(room, msg, excludeId) {
   Object.entries(room.players).forEach(function(e) {
-    var p = e[1];
-    if (e[0] !== excludeId && !p.disconnected) send(p.ws, msg);
+    if (e[0] !== excludeId) send(e[1].ws, msg);
   });
 }
 
 function broadcastAll(room, msg) { broadcast(room, msg, null); }
 
 function playerList(room) {
-  return Object.values(room.players).filter(function(p) { return !p.disconnected; }).map(function(p) {
-    return { id: p.id, nickname: p.nickname, ready: p.ready, color: p.color || 0xe74c3c };
+  return Object.values(room.players).map(function(p) {
+    return { id: p.id, nickname: p.nickname, ready: p.ready };
   });
 }
 
 function checkAutoStart(room) {
-  var total = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
-  var ready = Object.values(room.players).filter(function(p) { return p.ready && !p.disconnected; }).length;
-  if (total >= 2 && ready >= Math.ceil(total / 2) && !room.started) {
+  var total = Object.keys(room.players).length;
+  var ready = Object.values(room.players).filter(function(p) { return p.ready; }).length;
+  if (total >= 1 && ready >= Math.ceil(total / 2) && !room.started) {
     room.started = true;
     broadcastAll(room, { type: 'game_start', settings: room.settings });
   }
@@ -97,7 +84,7 @@ wss.on('connection', function(ws) {
         zombieCounter: 0
       };
       rooms[code].players[playerId] = {
-        id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c,
+        id: playerId, nickname: msg.nickname || 'PLAYER',
         ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0
       };
       send(ws, {
@@ -108,55 +95,17 @@ wss.on('connection', function(ws) {
     }
 
     // ── JOIN ROOM ────────────────────────────────────────
-    // ── REJOIN (reconnecting player with same nickname+roomCode) ──
-    else if (msg.type === 'rejoin') {
-      var room = rooms[msg.roomCode];
-      if (!room) { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
-      // Find a disconnected player slot with matching nickname
-      var existingId = null;
-      Object.keys(room.players).forEach(function(pid) {
-        var p = room.players[pid];
-        if (p.disconnected && p.nickname === (msg.nickname || '').toUpperCase()) existingId = pid;
-      });
-      if (existingId) {
-        // Restore their slot
-        playerId = existingId;
-        roomCode = msg.roomCode;
-        room.players[existingId].ws = ws;
-        room.players[existingId].disconnected = false;
-        if (msg.color) room.players[existingId].color = msg.color;
-        send(ws, {
-          type: 'joined', roomCode: msg.roomCode, playerId: existingId,
-          isHost: room.host === existingId, players: playerList(room), settings: room.settings
-        });
-        broadcast(room, { type: 'player_joined', player: { id: existingId, nickname: room.players[existingId].nickname, ready: room.players[existingId].ready, color: room.players[existingId].color } }, existingId);
-      } else {
-        // No matching slot, treat as fresh join
-        msg.type = 'join';
-        // fall through handled below — just re-send as join
-        var maxP = (room.settings && room.settings.maxPlayers) ? Number(room.settings.maxPlayers) : 4;
-        var connectedCount = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
-        if (connectedCount >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
-        playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-        roomCode = msg.roomCode;
-        room.players[playerId] = { id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c, ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0 };
-        send(ws, { type: 'joined', roomCode: msg.roomCode, playerId: playerId, isHost: false, players: playerList(room), settings: room.settings });
-        broadcast(room, { type: 'player_joined', player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false, color: msg.color || 0xe74c3c } }, playerId);
-      }
-    }
-
     else if (msg.type === 'join') {
       var room = rooms[msg.roomCode];
       if (!room)   { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
       if (room.started) { send(ws, { type: 'error', msg: 'GAME ALREADY STARTED' }); return; }
-      var maxP = (room.settings && room.settings.maxPlayers) ? Number(room.settings.maxPlayers) : 4;
-      var connectedCount = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
-      if (connectedCount >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
+      if (Object.keys(room.players).length >= room.settings.maxPlayers)
+        { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
 
       playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       roomCode = msg.roomCode;
       room.players[playerId] = {
-        id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c,
+        id: playerId, nickname: msg.nickname || 'PLAYER',
         ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0
       };
       send(ws, {
@@ -165,7 +114,7 @@ wss.on('connection', function(ws) {
       });
       broadcast(room, {
         type: 'player_joined',
-        player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false, color: msg.color || 0xe74c3c }
+        player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false }
       }, playerId);
     }
 
@@ -174,7 +123,7 @@ wss.on('connection', function(ws) {
       var room = rooms[roomCode];
       if (!room || !room.players[playerId]) return;
       room.players[playerId].ready = !room.players[playerId].ready;
-      broadcastAll(room, { type: 'player_ready', id: playerId, ready: room.players[playerId].ready });
+      broadcastAll(room, { type: 'player_ready', playerId: playerId, ready: room.players[playerId].ready });
       checkAutoStart(room);
     }
 
@@ -234,9 +183,6 @@ wss.on('connection', function(ws) {
       broadcast(room, { type: 'wave', waveNum: msg.waveNum, wTotal: msg.wTotal, wKilled: msg.wKilled, waveState: msg.waveState }, playerId);
     }
 
-    // ── KEEPALIVE PING ────────────────────────────────────
-    else if (msg.type === 'ping') { /* ignore, just keeps connection alive */ }
-
     // ── PLAYER DEAD ───────────────────────────────────────
     else if (msg.type === 'player_dead') {
       var room = rooms[roomCode];
@@ -250,37 +196,16 @@ wss.on('connection', function(ws) {
     if (!roomCode || !playerId) return;
     var room = rooms[roomCode];
     if (!room) return;
-
-    // Mark player as disconnected but keep them in the room for 60s
-    // so brief network drops don't destroy the room
-    var p = room.players[playerId];
-    if (p) p.disconnected = true;
-
+    delete room.players[playerId];
     broadcast(room, { type: 'player_left', id: playerId }, null);
-
-    // If host disconnected, transfer immediately so game can continue
-    if (room.host === playerId) {
-      var remaining = Object.keys(room.players).filter(function(id) {
-        return !room.players[id].disconnected;
-      });
-      if (remaining.length > 0) {
-        room.host = remaining[0];
-        broadcastAll(room, { type: 'new_host', id: room.host });
-      }
+    if (Object.keys(room.players).length === 0) {
+      delete rooms[roomCode];
+    } else if (room.host === playerId) {
+      // Transfer host to first remaining player
+      room.host = Object.keys(room.players)[0];
+      broadcastAll(room, { type: 'new_host', id: room.host });
     }
-
-    // Give 60 seconds grace before actually removing player/room
-    setTimeout(function() {
-      var r = rooms[roomCode];
-      if (!r || !r.players[playerId]) return;
-      // Only delete if still disconnected (not reconnected)
-      if (r.players[playerId].disconnected) {
-        delete r.players[playerId];
-        if (Object.keys(r.players).length === 0) {
-          delete rooms[roomCode];
-          console.log('Room ' + roomCode + ' deleted (empty)');
-        }
-      }
-    }, 60000);
   });
 });
+
+console.log('Dead Zone server running on port ' + PORT);
