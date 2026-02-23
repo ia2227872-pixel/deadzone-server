@@ -105,6 +105,43 @@ wss.on('connection', function(ws) {
     }
 
     // ── JOIN ROOM ────────────────────────────────────────
+    // ── REJOIN (reconnecting player with same nickname+roomCode) ──
+    else if (msg.type === 'rejoin') {
+      var room = rooms[msg.roomCode];
+      if (!room) { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
+      // Find a disconnected player slot with matching nickname
+      var existingId = null;
+      Object.keys(room.players).forEach(function(pid) {
+        var p = room.players[pid];
+        if (p.disconnected && p.nickname === (msg.nickname || '').toUpperCase()) existingId = pid;
+      });
+      if (existingId) {
+        // Restore their slot
+        playerId = existingId;
+        roomCode = msg.roomCode;
+        room.players[existingId].ws = ws;
+        room.players[existingId].disconnected = false;
+        if (msg.color) room.players[existingId].color = msg.color;
+        send(ws, {
+          type: 'joined', roomCode: msg.roomCode, playerId: existingId,
+          isHost: room.host === existingId, players: playerList(room), settings: room.settings
+        });
+        broadcast(room, { type: 'player_joined', player: { id: existingId, nickname: room.players[existingId].nickname, ready: room.players[existingId].ready, color: room.players[existingId].color } }, existingId);
+      } else {
+        // No matching slot, treat as fresh join
+        msg.type = 'join';
+        // fall through handled below — just re-send as join
+        var maxP = (room.settings && room.settings.maxPlayers) ? Number(room.settings.maxPlayers) : 4;
+        var connectedCount = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
+        if (connectedCount >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
+        playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        roomCode = msg.roomCode;
+        room.players[playerId] = { id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c, ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0 };
+        send(ws, { type: 'joined', roomCode: msg.roomCode, playerId: playerId, isHost: false, players: playerList(room), settings: room.settings });
+        broadcast(room, { type: 'player_joined', player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false, color: msg.color || 0xe74c3c } }, playerId);
+      }
+    }
+
     else if (msg.type === 'join') {
       var room = rooms[msg.roomCode];
       if (!room)   { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
