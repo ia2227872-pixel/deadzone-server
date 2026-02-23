@@ -45,26 +45,29 @@ function genCode() {
 }
 
 function send(ws, msg) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  } catch(e) { console.error('send error:', e.message); }
 }
 
 function broadcast(room, msg, excludeId) {
   Object.entries(room.players).forEach(function(e) {
-    if (e[0] !== excludeId) send(e[1].ws, msg);
+    var p = e[1];
+    if (e[0] !== excludeId && !p.disconnected) send(p.ws, msg);
   });
 }
 
 function broadcastAll(room, msg) { broadcast(room, msg, null); }
 
 function playerList(room) {
-  return Object.values(room.players).map(function(p) {
+  return Object.values(room.players).filter(function(p) { return !p.disconnected; }).map(function(p) {
     return { id: p.id, nickname: p.nickname, ready: p.ready, color: p.color || 0xe74c3c };
   });
 }
 
 function checkAutoStart(room) {
-  var total = Object.keys(room.players).length;
-  var ready = Object.values(room.players).filter(function(p) { return p.ready; }).length;
+  var total = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
+  var ready = Object.values(room.players).filter(function(p) { return p.ready && !p.disconnected; }).length;
   if (total >= 2 && ready >= Math.ceil(total / 2) && !room.started) {
     room.started = true;
     broadcastAll(room, { type: 'game_start', settings: room.settings });
