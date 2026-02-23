@@ -48,7 +48,7 @@ function broadcastAll(room, msg) { broadcast(room, msg, null); }
 
 function playerList(room) {
   return Object.values(room.players).map(function(p) {
-    return { id: p.id, nickname: p.nickname, ready: p.ready };
+    return { id: p.id, nickname: p.nickname, ready: p.ready, color: p.color || 0xe74c3c };
   });
 }
 
@@ -84,7 +84,7 @@ wss.on('connection', function(ws) {
         zombieCounter: 0
       };
       rooms[code].players[playerId] = {
-        id: playerId, nickname: msg.nickname || 'PLAYER',
+        id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c,
         ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0
       };
       send(ws, {
@@ -105,7 +105,7 @@ wss.on('connection', function(ws) {
       playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       roomCode = msg.roomCode;
       room.players[playerId] = {
-        id: playerId, nickname: msg.nickname || 'PLAYER',
+        id: playerId, nickname: msg.nickname || 'PLAYER', color: msg.color || 0xe74c3c,
         ready: false, ws: ws, x: 0, y: 1.75, z: 0, yaw: 0
       };
       send(ws, {
@@ -114,7 +114,7 @@ wss.on('connection', function(ws) {
       });
       broadcast(room, {
         type: 'player_joined',
-        player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false }
+        player: { id: playerId, nickname: msg.nickname || 'PLAYER', ready: false, color: msg.color || 0xe74c3c }
       }, playerId);
     }
 
