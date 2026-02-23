@@ -99,8 +99,8 @@ wss.on('connection', function(ws) {
       var room = rooms[msg.roomCode];
       if (!room)   { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
       if (room.started) { send(ws, { type: 'error', msg: 'GAME ALREADY STARTED' }); return; }
-      if (Object.keys(room.players).length >= room.settings.maxPlayers)
-        { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
+      var maxP = (room.settings && room.settings.maxPlayers) ? Number(room.settings.maxPlayers) : 4;
+      if (Object.keys(room.players).length >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
 
       playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       roomCode = msg.roomCode;
