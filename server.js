@@ -110,7 +110,8 @@ wss.on('connection', function(ws) {
       if (!room)   { send(ws, { type: 'error', msg: 'ROOM NOT FOUND' }); return; }
       if (room.started) { send(ws, { type: 'error', msg: 'GAME ALREADY STARTED' }); return; }
       var maxP = (room.settings && room.settings.maxPlayers) ? Number(room.settings.maxPlayers) : 4;
-      if (Object.keys(room.players).length >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
+      var connectedCount = Object.values(room.players).filter(function(p) { return !p.disconnected; }).length;
+      if (connectedCount >= maxP) { send(ws, { type: 'error', msg: 'ROOM IS FULL' }); return; }
 
       playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       roomCode = msg.roomCode;
@@ -209,14 +210,37 @@ wss.on('connection', function(ws) {
     if (!roomCode || !playerId) return;
     var room = rooms[roomCode];
     if (!room) return;
-    delete room.players[playerId];
+
+    // Mark player as disconnected but keep them in the room for 60s
+    // so brief network drops don't destroy the room
+    var p = room.players[playerId];
+    if (p) p.disconnected = true;
+
     broadcast(room, { type: 'player_left', id: playerId }, null);
-    if (Object.keys(room.players).length === 0) {
-      delete rooms[roomCode];
-    } else if (room.host === playerId) {
-      // Transfer host to first remaining player
-      room.host = Object.keys(room.players)[0];
-      broadcastAll(room, { type: 'new_host', id: room.host });
+
+    // If host disconnected, transfer immediately so game can continue
+    if (room.host === playerId) {
+      var remaining = Object.keys(room.players).filter(function(id) {
+        return !room.players[id].disconnected;
+      });
+      if (remaining.length > 0) {
+        room.host = remaining[0];
+        broadcastAll(room, { type: 'new_host', id: room.host });
+      }
     }
+
+    // Give 60 seconds grace before actually removing player/room
+    setTimeout(function() {
+      var r = rooms[roomCode];
+      if (!r || !r.players[playerId]) return;
+      // Only delete if still disconnected (not reconnected)
+      if (r.players[playerId].disconnected) {
+        delete r.players[playerId];
+        if (Object.keys(r.players).length === 0) {
+          delete rooms[roomCode];
+          console.log('Room ' + roomCode + ' deleted (empty)');
+        }
+      }
+    }, 60000);
   });
 });
