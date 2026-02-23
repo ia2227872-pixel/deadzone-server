@@ -183,6 +183,9 @@ wss.on('connection', function(ws) {
       broadcast(room, { type: 'wave', waveNum: msg.waveNum, wTotal: msg.wTotal, wKilled: msg.wKilled, waveState: msg.waveState }, playerId);
     }
 
+    // ── KEEPALIVE PING ────────────────────────────────────
+    else if (msg.type === 'ping') { /* ignore, just keeps connection alive */ }
+
     // ── PLAYER DEAD ───────────────────────────────────────
     else if (msg.type === 'player_dead') {
       var room = rooms[roomCode];
