@@ -21,10 +21,20 @@
 //  }
 // ══════════════════════════════════════════════════════════
 
-const WebSocket = require('ws');
+const WebSocket = require("ws");
+const http = require("http");
 const PORT = process.env.PORT || 3000;
-const wss = new WebSocket.Server({ port: PORT });
-const rooms = {};  // roomCode → room
+
+// HTTP server needed so Render can wake the dyno and route WS upgrades
+const httpServer = http.createServer(function(req, res) {
+  res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+  res.end("DEAD ZONE SERVER OK");
+});
+const wss = new WebSocket.Server({ server: httpServer });
+httpServer.listen(PORT, function() {
+  console.log("Dead Zone server running on port " + PORT);
+});
+const rooms = {};
 
 // ── helpers ────────────────────────────────────────────────
 function genCode() {
@@ -210,5 +220,3 @@ wss.on('connection', function(ws) {
     }
   });
 });
-
-console.log('Dead Zone server running on port ' + PORT);
