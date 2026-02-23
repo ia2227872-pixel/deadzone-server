@@ -55,7 +55,7 @@ function playerList(room) {
 function checkAutoStart(room) {
   var total = Object.keys(room.players).length;
   var ready = Object.values(room.players).filter(function(p) { return p.ready; }).length;
-  if (total >= 1 && ready >= Math.ceil(total / 2) && !room.started) {
+  if (total >= 2 && ready >= Math.ceil(total / 2) && !room.started) {
     room.started = true;
     broadcastAll(room, { type: 'game_start', settings: room.settings });
   }
@@ -123,7 +123,7 @@ wss.on('connection', function(ws) {
       var room = rooms[roomCode];
       if (!room || !room.players[playerId]) return;
       room.players[playerId].ready = !room.players[playerId].ready;
-      broadcastAll(room, { type: 'player_ready', playerId: playerId, ready: room.players[playerId].ready });
+      broadcastAll(room, { type: 'player_ready', id: playerId, ready: room.players[playerId].ready });
       checkAutoStart(room);
     }
 
